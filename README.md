@@ -1,4 +1,4 @@
-# TindaTap v1.0.0
+# TindaTap v1.0.1
 
 **Offline POS and inventory app for sari-sari stores.**
 
