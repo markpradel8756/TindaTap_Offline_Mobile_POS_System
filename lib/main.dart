@@ -12,8 +12,6 @@ import 'screens/home_screen.dart';
 import 'screens/setup_screen.dart';
 import 'screens/settings/pin_lock_screen.dart';
 
-/// Initializes Flutter, opens the local database, loads persisted state, and
-/// starts the app with the shared providers already ready to use.
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await DatabaseHelper.instance.initDatabase();
@@ -44,8 +42,6 @@ Future<void> main() async {
 class TindaTapApp extends StatelessWidget {
   const TindaTapApp({super.key});
 
-  /// Builds the app's single light theme so colors and controls stay
-  /// consistent across every screen.
   ThemeData _lightTheme() {
     final base = ThemeData(
       useMaterial3: true,
@@ -75,15 +71,11 @@ class TindaTapApp extends StatelessWidget {
   }
 
   @override
-
-  /// Builds the root MaterialApp and routes the user into setup, lock, or the
-  /// main home screen depending on the current app state.
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'TindaTap',
       theme: _lightTheme(),
-      // Enforce single light theme only
       home: const AppGate(),
     );
   }
@@ -100,7 +92,6 @@ class _AppGateState extends State<AppGate> with WidgetsBindingObserver {
   bool _locked = false;
   bool _configured = false;
   bool _lastKnownPinEnabled = false;
-  Timer? _timeoutTimer;
 
   @override
   void initState() {
@@ -111,50 +102,15 @@ class _AppGateState extends State<AppGate> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _timeoutTimer?.cancel();
     super.dispose();
   }
 
-  /// Starts or refreshes the inactivity timer that locks the app after the
-  /// configured timeout period.
-  void _startTimeoutTimer(int minutes) {
-    _timeoutTimer?.cancel();
-    if (minutes <= 0) return;
-    _timeoutTimer = Timer(Duration(minutes: minutes), () {
-      if (!mounted) return;
-      final settings = context.read<SettingsProvider>();
-      if (settings.pinEnabled) {
-        setState(() => _locked = true);
-      }
-    });
-  }
-
-  /// Clears the lock flag after a successful PIN unlock and restarts the idle
-  /// timer so the app can lock again later.
   void _unlock() {
-    final settings = context.read<SettingsProvider>();
     setState(() => _locked = false);
-    _startTimeoutTimer(settings.pinTimeoutMinutes);
   }
 
   @override
-
-  /// Reacts to lifecycle changes so the app can cancel timers when paused and
-  /// re-lock itself when the user returns.
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    final settings = context.read<SettingsProvider>();
-    if (!settings.pinEnabled) return;
-
-    if (state == AppLifecycleState.paused ||
-        state == AppLifecycleState.inactive ||
-        state == AppLifecycleState.detached) {
-      _timeoutTimer?.cancel();
-    }
-
-    if (state == AppLifecycleState.resumed && settings.isSetupComplete) {
-      setState(() => _locked = true);
-    }
-  }
+  void didChangeAppLifecycleState(AppLifecycleState state) {}
 
   @override
   Widget build(BuildContext context) {
@@ -174,11 +130,6 @@ class _AppGateState extends State<AppGate> with WidgetsBindingObserver {
           _lastKnownPinEnabled = settings.pinEnabled;
           _locked = settings.pinEnabled;
         });
-        if (settings.pinEnabled) {
-          _startTimeoutTimer(settings.pinTimeoutMinutes);
-        } else {
-          _timeoutTimer?.cancel();
-        }
       });
     }
 
