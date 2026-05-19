@@ -555,7 +555,7 @@ class _QrPaymentSection extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         DropdownButtonFormField<QrCodeEntry>(
-          value: selectedQr ?? qrCodes.first,
+          initialValue: selectedQr ?? qrCodes.first,
           decoration: InputDecoration(
             labelText: 'Select QR code',
             filled: true,

@@ -48,8 +48,9 @@ class _AddQrDialogState extends State<AddQrDialog> {
 
   /// Opens the gallery picker unless the dialog is in edit mode.
   Future<void> _pickImage() async {
-    if (_isEdit)
+    if (_isEdit) {
       return; // disable changing image in edit mode to avoid complexity
+    }
     final file = await ImagePicker().pickImage(source: ImageSource.gallery);
     if (file == null) return;
     setState(() => _picked = file);
@@ -210,15 +211,6 @@ class _AddQrDialogState extends State<AddQrDialog> {
               const SizedBox(height: 16),
               FilledButton(
                 onPressed: _isValid ? _save : null,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  child: _saving
-                      ? const SizedBox(
-                          height: 16,
-                          width: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2))
-                      : Text(_isEdit ? 'Update QR' : 'Add QR Code'),
-                ),
                 style: FilledButton.styleFrom(
                   backgroundColor: _isValid
                       ? const Color(0xFF12B981)
@@ -227,6 +219,15 @@ class _AddQrDialogState extends State<AddQrDialog> {
                       _isValid ? Colors.white : const Color(0xFF8E98A8),
                   shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12)),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  child: _saving
+                      ? const SizedBox(
+                          height: 16,
+                          width: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2))
+                      : Text(_isEdit ? 'Update QR' : 'Add QR Code'),
                 ),
               ),
             ],

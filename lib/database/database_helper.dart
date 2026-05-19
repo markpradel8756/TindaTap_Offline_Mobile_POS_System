@@ -410,7 +410,7 @@ class DatabaseHelper {
       ORDER BY total_sold DESC, ti.product_name ASC
       LIMIT ?
       ''',
-      ['-${days} day', limit],
+      ['-$days day', limit],
     );
   }
 
