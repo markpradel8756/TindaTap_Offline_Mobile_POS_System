@@ -251,17 +251,15 @@ class SettingsProvider extends ChangeNotifier {
     await refreshQrCodes();
   }
 
-  /// Exports the app database as a backup file and returns its path.
-  Future<String> exportBackup() async {
-    return _databaseHelper.exportDatabaseCopy();
+  /// Exports all store data into a JSON-friendly backup payload.
+  Future<Map<String, dynamic>> exportBackupData() async {
+    return _databaseHelper.exportBackupPayload();
   }
 
-  /// Imports a backup, then reloads settings and QR codes into memory.
-  Future<void> importBackup(String sourcePath) async {
-    await _databaseHelper.importDatabaseFromPath(sourcePath);
+  /// Restores a validated backup payload and refreshes cached state.
+  Future<void> importBackupData(Map<String, dynamic> payload) async {
+    await _databaseHelper.importBackupPayload(payload);
     // reload settings and related cached items
     await loadSettings();
-    await refreshQrCodes();
-    notifyListeners();
   }
 }

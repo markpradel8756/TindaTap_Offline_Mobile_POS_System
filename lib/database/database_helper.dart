@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -468,6 +469,117 @@ class DatabaseHelper {
     return destinationPath;
   }
 
+  /// Builds a complete JSON-friendly backup payload from the app's tables.
+  Future<Map<String, dynamic>> exportBackupPayload() async {
+    final db = await database;
+    final settingsRows = await getSettingsMap();
+    final products = await db.query('products', orderBy: 'id ASC');
+    final transactions = await db.query('transactions', orderBy: 'id ASC');
+    final transactionItems =
+        await db.query('transaction_items', orderBy: 'id ASC');
+    final qrCodes = await db.query('qr_codes', orderBy: 'id ASC');
+
+    final qrPayload = <Map<String, dynamic>>[];
+    for (final row in qrCodes) {
+      final imagePath = (row['image_path'] ?? '') as String;
+      final file = File(imagePath);
+      final imageBytes = await file.exists() ? await file.readAsBytes() : null;
+      qrPayload.add({
+        'id': row['id'],
+        'label': row['label'],
+        'image_file_name': imagePath.isEmpty ? '' : path.basename(imagePath),
+        'image_data': imageBytes == null ? '' : base64Encode(imageBytes),
+      });
+    }
+
+    return {
+      'app': AppConstants.appName,
+      'schema_version': 1,
+      'exported_at': DateTime.now().toIso8601String(),
+      'products': products,
+      'transactions': transactions,
+      'transaction_items': transactionItems,
+      'settings': settingsRows,
+      'qr_codes': qrPayload,
+    };
+  }
+
+  /// Restores the database from a validated JSON backup payload.
+  Future<void> importBackupPayload(Map<String, dynamic> payload) async {
+    final products = _readList(payload, 'products');
+    final transactions = _readList(payload, 'transactions');
+    final transactionItems = _readList(payload, 'transaction_items');
+    final qrCodes = _readList(payload, 'qr_codes');
+    final settings = _readStringMap(payload['settings'], 'settings');
+    final mergedSettings = <String, String>{
+      ..._defaultSettings(),
+      ...settings,
+    };
+
+    final documents = await getApplicationDocumentsDirectory();
+    final qrDirectory = Directory(path.join(documents.path, 'qr_images'));
+    if (!await qrDirectory.exists()) {
+      await qrDirectory.create(recursive: true);
+    }
+
+    final db = await database;
+    await db.transaction((txn) async {
+      await txn.delete('transaction_items');
+      await txn.delete('transactions');
+      await txn.delete('products');
+      await txn.delete('qr_codes');
+      await txn.delete('settings');
+
+      for (var i = 0; i < products.length; i++) {
+        final product = _productFromBackupMap(products[i], i);
+        await txn.insert(
+          'products',
+          product.toMap(),
+          conflictAlgorithm: sqflite_db.ConflictAlgorithm.replace,
+        );
+      }
+
+      for (var i = 0; i < transactions.length; i++) {
+        final transaction = _transactionFromBackupMap(transactions[i], i);
+        await txn.insert(
+          'transactions',
+          transaction.toMap(),
+          conflictAlgorithm: sqflite_db.ConflictAlgorithm.replace,
+        );
+      }
+
+      for (var i = 0; i < transactionItems.length; i++) {
+        final item = _transactionItemFromBackupMap(transactionItems[i], i);
+        await txn.insert(
+          'transaction_items',
+          item.toMap(),
+          conflictAlgorithm: sqflite_db.ConflictAlgorithm.replace,
+        );
+      }
+
+      for (final entry in mergedSettings.entries) {
+        await txn.insert(
+          'settings',
+          {'key': entry.key, 'value': entry.value},
+          conflictAlgorithm: sqflite_db.ConflictAlgorithm.replace,
+        );
+      }
+
+      for (var i = 0; i < qrCodes.length; i++) {
+        final qrCode = await _qrCodeFromBackupMap(
+          qrCodes[i],
+          index: i,
+          qrDirectoryPath: qrDirectory.path,
+        );
+        await txn.insert(
+          'qr_codes',
+          qrCode.toMap(),
+          conflictAlgorithm: sqflite_db.ConflictAlgorithm.replace,
+        );
+      }
+    });
+  }
+
   /// Close the open database connection, if any.
   Future<void> closeDatabase() async {
     if (_database != null) {
@@ -502,4 +614,146 @@ class DatabaseHelper {
   /// Exposes the current database file path for tests and diagnostics.
   @visibleForTesting
   String? get databasePath => _dbPath;
+
+  Map<String, String> _defaultSettings() {
+    return {
+      AppConstants.settingStoreName: '',
+      AppConstants.settingCurrency: 'PHP',
+      AppConstants.settingPinEnabled: 'false',
+      AppConstants.settingPinHash: '',
+      AppConstants.settingSecurityQuestion: '',
+      AppConstants.settingSecurityAnswerHash: '',
+      AppConstants.settingLowStockThreshold:
+          AppConstants.defaultLowStockThreshold.toString(),
+      AppConstants.settingPinTimeoutMinutes:
+          AppConstants.defaultPinTimeoutMinutes.toString(),
+    };
+  }
+
+  List<dynamic> _readList(Map<String, dynamic> payload, String key) {
+    final value = payload[key];
+    if (value == null) {
+      throw FormatException('Backup is missing the "$key" section.');
+    }
+    if (value is! List) {
+      throw FormatException('Backup section "$key" must be a list.');
+    }
+    return value;
+  }
+
+  Map<String, String> _readStringMap(dynamic value, String fieldName) {
+    if (value == null) {
+      throw FormatException('Backup is missing the "$fieldName" section.');
+    }
+    if (value is! Map) {
+      throw FormatException('Backup section "$fieldName" must be a map.');
+    }
+
+    final result = <String, String>{};
+    for (final entry in value.entries) {
+      final key = entry.key?.toString().trim() ?? '';
+      if (key.isEmpty) {
+        throw FormatException(
+          'Backup section "$fieldName" contains an empty key.',
+        );
+      }
+      final raw = entry.value;
+      if (raw == null) {
+        result[key] = '';
+      } else if (raw is String || raw is num || raw is bool) {
+        result[key] = raw.toString();
+      } else {
+        throw FormatException(
+          'Backup section "$fieldName" contains an invalid value for "$key".',
+        );
+      }
+    }
+    return result;
+  }
+
+  ProductModel _productFromBackupMap(dynamic value, int index) {
+    final map = _readMap(value, 'products[$index]');
+    return ProductModel.fromMap(map);
+  }
+
+  SaleTransaction _transactionFromBackupMap(dynamic value, int index) {
+    final map = _readMap(value, 'transactions[$index]');
+    return SaleTransaction.fromMap(map);
+  }
+
+  TransactionItemModel _transactionItemFromBackupMap(dynamic value, int index) {
+    final map = _readMap(value, 'transaction_items[$index]');
+    return TransactionItemModel.fromMap(map);
+  }
+
+  Future<QrCodeEntry> _qrCodeFromBackupMap(
+    dynamic value, {
+    required int index,
+    required String qrDirectoryPath,
+  }) async {
+    final map = _readMap(value, 'qr_codes[$index]');
+    final label = _readRequiredString(map, 'label', 'qr_codes[$index]');
+    final imageData = _optionalString(map['image_data']);
+    final imageFileName = _optionalString(map['image_file_name']).trim();
+
+    if (imageData.isEmpty) {
+      throw FormatException(
+        'Backup QR code "$label" is missing image data.',
+      );
+    }
+
+    final sanitizedName = imageFileName.isEmpty
+        ? 'qr_${DateTime.now().millisecondsSinceEpoch}_$index.png'
+        : _sanitizeFileName(imageFileName);
+    final destinationPath = path.join(qrDirectoryPath, sanitizedName);
+    final bytes = base64Decode(imageData);
+    await File(destinationPath).writeAsBytes(bytes, flush: true);
+
+    return QrCodeEntry(
+      id: _optionalInt(map['id']),
+      label: label,
+      imagePath: destinationPath,
+    );
+  }
+
+  Map<String, dynamic> _readMap(dynamic value, String fieldName) {
+    if (value is! Map) {
+      throw FormatException('Backup item "$fieldName" must be a map.');
+    }
+    return Map<String, dynamic>.from(value);
+  }
+
+  String _readRequiredString(
+    Map<String, dynamic> map,
+    String key,
+    String fieldName,
+  ) {
+    final value = map[key];
+    final result = _optionalString(value);
+    if (result.isEmpty) {
+      throw FormatException('Backup item "$fieldName" is missing "$key".');
+    }
+    return result;
+  }
+
+  String _optionalString(dynamic value) {
+    if (value == null) return '';
+    if (value is String || value is num || value is bool) {
+      return value.toString();
+    }
+    return '';
+  }
+
+  int? _optionalInt(dynamic value) {
+    if (value == null) return null;
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    return int.tryParse(value.toString());
+  }
+
+  String _sanitizeFileName(String value) {
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) return 'backup_image.png';
+    return trimmed.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+  }
 }
